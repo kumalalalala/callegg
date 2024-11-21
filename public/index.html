@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Video Call</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wght@0,6..12,200..1000;1,6..12,200..1000&family=Ubuntu+Sans+Mono:ital,wght@0,400..700;1,400..700&display=swap');
+
+        body {
+            margin: auto;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: #f5f1eb;
+            font-family: "San Francisco", -apple-system, BlinkMacSystemFont, "Nunito Sans", sans-serif;
+        }
+
+        video {
+            margin: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .video-container {
+            display: flex;
+            justify-content: center;
+            width: 90%;
+        }
+
+        .video {
+            width: 45%;
+        }
+
+        .custom-btn {
+            padding: 20px 44px;
+            background-color: transparent;
+            border: 3px solid #141211;
+            border-radius: 50px;
+            font-family: "Ubuntu Sans Mono", monospace;
+            color: #141211;
+            font-size: 20px;
+            text-decoration: none;
+            transition: all 200ms;
+        }
+
+        .custom-btn:hover {
+            box-shadow: 0px 12px 1px #141211;
+        }
+
+        .custom-btn:active {
+            transform: translateY(10px);
+            box-shadow: 0 0 0;
+        }
+
+        h1 {
+            font-family: "Nixie One", system-ui;
+            font-size: 32px;
+            color: #141211;
+        }
+
+        .container {
+            margin-top: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-direction: column;
+            gap: 6px;
+            width: 90%;
+        }
+
+        .row {
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+
+        #switchCameraButton {
+            display: none;
+        }
+
+        #zoomLevels {
+            display: none;
+            flex-direction: column;
+            position: absolute;
+            gap: 10px;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+        }
+
+        .zoom-level {
+            padding: 5px 10px;
+            background-color: #141211;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .zoom-level:hover {
+            background-color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .video {
+                width: 90%;
+                max-width: 160px;
+            }
+
+            .custom-btn {
+                padding: 5px 10px;
+                font-size: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Call by Egg</h1>
+    <div class="video-container">
+        <video id="localVideo" class="video" autoplay playsinline muted></video>
+        <video id="remoteVideo" class="video" autoplay playsinline></video>
+    </div>
+    <div id="buttons" class="container">
+        <div class="row">
+            <button id="startButton" class="custom-btn">Bắt đầu cuộc gọi</button>
+            <button id="muteButton" class="custom-btn">Tắt loa</button>
+            <button id="micButton" class="custom-btn">Tắt mic</button>
+        </div>
+        <div class="row">
+            <button id="switchCameraButton" class="custom-btn">Đảo chiều camera</button>
+            <button id="stopCameraButton" class="custom-btn">Tắt camera</button>
+        </div>
+        <div class="row">
+            <button id="zoomButton" class="custom-btn">Zoom Camera</button>
+            <div id="zoomLevels">
+                <button class="zoom-level" data-zoom="1">1x</button>
+                <button class="zoom-level" data-zoom="2">2x</button>
+                <button class="zoom-level" data-zoom="3">3x</button>
+                <button class="zoom-level" data-zoom="4">4x</button>
+                <button class="zoom-level" data-zoom="5">5x</button>
+                <button class="zoom-level" data-zoom="6">6x</button>
+                <button class="zoom-level" data-zoom="7">7x</button>
+                <button class="zoom-level" data-zoom="8">8x</button>
+                <button class="zoom-level" data-zoom="9">9x</button>
+                <button class="zoom-level" data-zoom="10">10x</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const startButton = document.getElementById('startButton');
+        const muteButton = document.getElementById('muteButton');
+        const micButton = document.getElementById('micButton');
+        const switchCameraButton = document.getElementById('switchCameraButton');
+        const stopCameraButton = document.getElementById('stopCameraButton');
+        const zoomButton = document.getElementById('zoomButton');
+        const zoomLevels = document.getElementById('zoomLevels');
+        const socket = io();
+
+        let localStream;
+        let peerConnection;
+        let currentCamera = 'user';
+
+        // Kiểm tra xem thiết bị có phải là điện thoại hay không
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile) {
+            switchCameraButton.style.display = 'block'; // Hiện nút đảo chiều camera nếu là điện thoại
+            zoomButton.style.display = 'block'; // Hiện nút zoom nếu là điện thoại
+        }
+
+        const configuration = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        async function startStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentCamera },
+                    audio: true
+                });
+                localVideo.srcObject = localStream;
+            } catch (error) {
+                console.error("Lỗi khi truy cập camera và micro:", error);
+            }
+        }
+
+        async function startCall() {
+            peerConnection = new RTCPeerConnection(configuration);
+            localStream.getTracks().forEach((track) => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('candidate', event.candidate);
+                }
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', offer);
+        }
+
+        socket.on('offer', async (offer) => {
+            peerConnection = new RTCPeerConnection(configuration);
+            localStream.getTracks().forEach((track) => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            peerConnection.ontrack = (event) => {
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('candidate', event.candidate);
+                }
+            };
+
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', answer);
+        });
+
+        socket.on('answer', (answer) => {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('candidate', (candidate) => {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        startButton.onclick = async () => {
+            await startStream();
+            startCall();
+        };
+
+        muteButton.onclick = () => {
+            const remoteStream = remoteVideo.srcObject;
+            if (remoteStream) {
+                remoteVideo.muted = !remoteVideo.muted;
+                muteButton.textContent = remoteVideo.muted ? 'Bật loa' : 'Tắt loa';
+            }
+        };
+
+        micButton.onclick = () => {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                micButton.textContent = audioTrack.enabled ? 'Tắt mic' : 'Bật mic';
+            }
+        };
+
+        switchCameraButton.onclick = () => {
+            currentCamera = currentCamera === 'user' ? 'environment' : 'user';
+            startStream();
+        };
+
+        stopCameraButton.onclick = () => {
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                stopCameraButton.textContent = videoTrack.enabled ? 'Tắt camera' : 'Bật camera';
+            }
+        };
+
+        zoomButton.onclick = () => {
+            zoomLevels.style.display = zoomLevels.style.display === 'none' ? 'flex' : 'none';
+        };
+
+        document.querySelectorAll('.zoom-level').forEach(button => {
+            button.onclick = (event) => {
+                const zoomValue = event.target.getAttribute('data-zoom');
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    const constraints = {
+                        advanced: [{ zoom: zoomValue }]
+                    };
+                    videoTrack.applyConstraints(constraints)
+                        .then(() => console.log(`Zoom applied: ${zoomValue}`))
+                        .catch(error => console.error("Error applying zoom constraints:", error));
+                }
+            };
+        });
+
+    </script>
+</body>
+</html>
